@@ -7,4 +7,4 @@ Implementation of the On-line Viterbi Algorithm for almost real time processing.
 The version chosen for the on-line algorithm is the one found in "The on-line Viterbi algorithm" (Master’s Thesis) by 
 Rastislav Šrámek.
 
-stdViterbi.c implements the Standard Viterbi Algorithm.
+stdViterbi.c implements both the Standard Viterbi Algorithm and the On-line Viterbi Algorithm.
