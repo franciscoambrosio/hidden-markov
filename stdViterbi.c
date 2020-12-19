@@ -57,9 +57,12 @@ prob_column_t * probs_last_column = NULL;   //Pointer to last column of probabil
 state_column_t * states_first_column = NULL;   //Pointer to first column of states matrix
 state_column_t * states_last_column = NULL;   //Pointer to last column of states matrix
 
+int decoded_stream[T];
+int decoded_stream_idx=0;
  
 void online_viterbi_initialization(int starting_state){
    last = NULL;
+   decoded_stream_idx = 0;
 
    //Create scores and path matrices
    prob_column_t * p_first = NULL;
@@ -229,10 +232,13 @@ void traceback(){
    prob_column_t * P = NULL;
    state_column_t * s_col = states_last_column;
    state_column_t * S = NULL;     //Auxiliary state column
+   int interim_decoded_stream[T] = {0,};
+   int interim_decoded_stream_idx = 0;
    int depth=0;
 
    int output = root->j;
    printf("%d ", output);
+   interim_decoded_stream[interim_decoded_stream_idx++] = output;
 
    for (int i = 0; i < delta_t; i++)  {
       if(s_col != NULL){    //Find column corresponding to root
@@ -254,6 +260,7 @@ void traceback(){
    while(depth-- > 0){    //Traceback from new root to previous root
       output = s_col->col[output];
       printf("%d ", output);
+      interim_decoded_stream[interim_decoded_stream_idx++] = output;
       S = s_col;
       s_col = s_col->previous;
       // s_col->next = NULL;
@@ -282,6 +289,10 @@ void traceback(){
       P = NULL;
    }
 
+
+   for(int i=interim_decoded_stream_idx-1;i>=0;i--)
+      decoded_stream[decoded_stream_idx++] = interim_decoded_stream[i];
+
 }
 
 void traceback_last_part(){
@@ -289,6 +300,8 @@ void traceback_last_part(){
    prob_column_t * P = NULL;
    state_column_t * s_col = states_last_column;
    state_column_t * S = NULL;     //Auxiliary state column
+   int interim_decoded_stream[T] = {0,};
+   int interim_decoded_stream_idx = 0;
    int depth = 0;
 
    // get index for maximum value of last column
@@ -302,8 +315,10 @@ void traceback_last_part(){
          max_index = i;
       }
    }
+
    int output = max_index;
    printf("%d ", output);
+   interim_decoded_stream[interim_decoded_stream_idx++] = output;
 
    if (s_col != NULL && s_col->next != NULL){s_col->next->previous = NULL;}
    if (p_col != NULL &&  p_col->next != NULL){ p_col->next->previous = NULL;}
@@ -316,6 +331,7 @@ void traceback_last_part(){
    while(depth-- > 0){    //Traceback from new root to previous root
       output = s_col->col[output];
       printf("%d ", output);
+      interim_decoded_stream[interim_decoded_stream_idx++] = output;
 
       S = s_col;
       s_col = s_col->previous;
@@ -343,6 +359,9 @@ void traceback_last_part(){
       S = NULL;
       P = NULL;
    }
+
+   for(int i=interim_decoded_stream_idx-1;i>=0;i--)
+      decoded_stream[decoded_stream_idx++] = interim_decoded_stream[i];
 
 }
 
@@ -402,9 +421,18 @@ void update(int t, int observation){
       current = current->previous;
    }
 
+   // printf("\nBefore compress\n");
+   // printList();
+   // printProbList();
+   // printStateList();
+
    compress(t);
 
+   // printf("\nAfter compress\n");
+   // printList();
+
    if(find_new_root()){
+      // printf("Found New root : (%d, %d) \n", root->t, root->j);
       traceback();
    }
 }
@@ -538,7 +566,8 @@ int main() {
          std_viterbi(observations);
          printf("\nStd Viterbi window:  ");
          printArray(T, optimalPath);
-
+         printf("\nOnline Viterbi window:  ");
+         printArray(T, decoded_stream);
          printf("\n\n");
 
          // for fresh new start of online viterbi decoding
