@@ -5,11 +5,12 @@
 #include <stdio.h>
 #include <stdbool.h>
 #include <unistd.h> // For waiting time on Linux
+#include <time.h> // For waiting time on Linux
 
 
-const int K = 4; //# of Hidden States
-const int M = 4; //# of Observation Symbols
-const int T = 100; //# of time instances
+#define  K  (4)          //# of Hidden States
+#define  M  (4)          //# of Observation Symbols
+#define  T  (10)        //# of time instances
 
 const double A[K][K] = { { 0.96, 0.04, 0.0, 0.0 }, //Transition Probability Matrix
                            { 0, 0.95, 0.05, 0.0 }, 
@@ -48,6 +49,7 @@ typedef struct scolumn {
 int delta_t = 0;         //Time delta from leaves to root
 node_t * last = NULL;    //Last node of linked list
 node_t * root = NULL;    //Root of the tree
+int prev_root_time = -1;
 node_t * leaves[K] = {NULL};  //List of leaves
 
 prob_column_t * probs_first_column = NULL;  //Pointer to first column of probabilities matrix
@@ -58,6 +60,7 @@ state_column_t * states_last_column = NULL;   //Pointer to last column of states
  
 void online_viterbi_initialization(int starting_state){
    last = NULL;
+
    //Create scores and path matrices
    prob_column_t * p_first = NULL;
    p_first = (prob_column_t *) calloc(1, sizeof(prob_column_t));
@@ -83,17 +86,11 @@ void online_viterbi_initialization(int starting_state){
 
    //Create leaves
    for(int j = 0; j<K; j++){
-         node_t * new_node = NULL;
-         new_node = (node_t *) calloc(1, sizeof(node_t));
-         new_node->j = j;
-         new_node->t = 0;
-         new_node->parent = NULL;
-         new_node->previous = last;
-         new_node->children = 0;
-         last = new_node;
-         leaves[j] = new_node;
+         leaves[j] = NULL;
    }
-   root = leaves[starting_state];   //Store initial root
+
+   root = NULL;
+   prev_root_time = -1;
 }
 
 
@@ -138,11 +135,22 @@ void compress(int t) {
       if(current != NULL){current = current->previous;}
       
    }
-
-
-
-
 }
+
+
+void free_all_nodes(void) {
+   node_t * current = last;
+   node_t * temp = NULL;
+
+   while (current != NULL) {
+
+      temp = current->previous;
+      free(current);
+      current = temp;
+      
+   }
+}
+
 
 bool find_new_root(){ 
    //Returns true if root has changed based on time delta between previous root and new root
@@ -151,6 +159,36 @@ bool find_new_root(){
    node_t * current = last;
    node_t * aux = last;   //Auxiliary node - Last node that has 2 or more children
    delta_t = last->t;
+
+
+   // first make sure path has merged
+   if (root==NULL){
+      node_t *leaf = last;
+      node_t *traced_root[K] = {NULL,};
+      node_t *temp = NULL;
+      node_t *track = NULL;
+      for (int i=0 ; i<K ; i++){
+         track = leaf;
+         while (track != NULL){
+            temp =  track;
+            track = track->parent;
+            if (track==NULL)
+               traced_root[i] = temp;
+         }
+         leaf = leaf->previous;
+      }
+
+      bool merged = true;
+      for (int i=1;i<K;i++){
+         if (traced_root[0] != traced_root[i]) {
+            merged = false;
+            break;
+         }
+      }
+
+      if (!merged)
+         return false;
+   }
 
    /*
    Find last node that has at least 2 children starting from any leave or node with at least two children
@@ -161,6 +199,9 @@ bool find_new_root(){
    Lecture Notes in Computer Science, vol 4645. Springer, Berlin, Heidelberg"
   */
   
+
+
+
    while (current != NULL) {
       if (current->children >= 2){
          aux = current;
@@ -174,6 +215,8 @@ bool find_new_root(){
       }
       else
       {
+         if (root)
+            prev_root_time = root->t;
          root = aux;
          return true;
       }
@@ -186,35 +229,58 @@ void traceback(){
    prob_column_t * P = NULL;
    state_column_t * s_col = states_last_column;
    state_column_t * S = NULL;     //Auxiliary state column
+   int depth=0;
 
    int output = root->j;
    printf("%d ", output);
-      for (int i = 0; i < delta_t; i++)  {
-          if(s_col != NULL){    //Find column corresponding to root
-            s_col = s_col->previous;
-          }
-          if(p_col != NULL){    //Find column corresponding to root
-            p_col = p_col->previous;         
-         }
-        
+
+   for (int i = 0; i < delta_t; i++)  {
+      if(s_col != NULL){    //Find column corresponding to root
+         s_col = s_col->previous;
+      }
+       if(p_col != NULL){    //Find column corresponding to root
+         p_col = p_col->previous;         
+      }  
    }
    
    if (s_col != NULL && s_col->next != NULL){s_col->next->previous = NULL;}
    if ( p_col != NULL &&  p_col->next != NULL){ p_col->next->previous = NULL;}
 
-   while(p_col != NULL && p_col->previous != NULL && s_col->previous!= s_col){    //Traceback from new root to previous root
+   if (prev_root_time == -1)
+      depth = root->t;
+   else
+      depth = (root->t - prev_root_time - 1);
+
+   while(depth-- > 0){    //Traceback from new root to previous root
       output = s_col->col[output];
       printf("%d ", output);
       S = s_col;
       s_col = s_col->previous;
-      s_col->next = NULL;
+      // s_col->next = NULL;
       P = p_col;
       p_col = p_col->previous;
-      p_col->next = NULL;
+      // p_col->next = NULL;
+      free(S);
+      free(P);
       S = NULL;
       P = NULL;
    } 
    printf("\n");
+
+
+   // free further remaining 
+   while (p_col!=NULL){
+      S = s_col;
+      s_col = s_col->previous;
+      // s_col->next = NULL;
+      P = p_col;
+      p_col = p_col->previous;
+      // p_col->next = NULL;
+      free(S);
+      free(P);
+      S = NULL;
+      P = NULL;
+   }
 
 }
 
@@ -223,27 +289,60 @@ void traceback_last_part(){
    prob_column_t * P = NULL;
    state_column_t * s_col = states_last_column;
    state_column_t * S = NULL;     //Auxiliary state column
+   int depth = 0;
 
-   int output = root->j;
+   // get index for maximum value of last column
+   double max = -1;
+   double aux = -1;
+   int max_index = 0;
+   for (int i = 0; i < K; i++){
+      aux = p_col->col[i];
+      if (aux > max){
+         max = aux;
+         max_index = i;
+      }
+   }
+   int output = max_index;
    printf("%d ", output);
-   
+
    if (s_col != NULL && s_col->next != NULL){s_col->next->previous = NULL;}
    if (p_col != NULL &&  p_col->next != NULL){ p_col->next->previous = NULL;}
 
+   if (root==NULL)
+      depth = (T-1);
+   else
+      depth = (T-1) - root->t - 1;
 
-   while(p_col != NULL && p_col->previous != NULL && s_col->previous!= s_col){    //Traceback from new root to previous root
+   while(depth-- > 0){    //Traceback from new root to previous root
       output = s_col->col[output];
       printf("%d ", output);
+
       S = s_col;
       s_col = s_col->previous;
-      s_col->next = NULL;
+      // s_col->next = NULL;
       P = p_col;
       p_col = p_col->previous;
-      p_col->next = NULL;
+      // p_col->next = NULL;
+      free(S);
+      free(P);
       S = NULL;
       P = NULL;
    } 
    printf("\n");
+
+   // free further remaining 
+   while (p_col!=NULL){
+      S = s_col;
+      s_col = s_col->previous;
+      // s_col->next = NULL;
+      P = p_col;
+      p_col = p_col->previous;
+      // p_col->next = NULL;
+      free(S);
+      free(P);
+      S = NULL;
+      P = NULL;
+   }
 
 }
 
@@ -273,9 +372,9 @@ void update(int t, int observation){
       double aux = -1;
       int max_index = 0;
       for (int i = 0; i < K; i++){
-         aux = probs_last_column->previous->col[i]*A[i][j];  
+         aux = probs_last_column->previous->col[i]*A[i][j]*E[j][observation];
          if (aux > max){
-            max = aux*E[j][observation];
+            max = aux;
             max_index = i;
          }
       }
@@ -290,31 +389,64 @@ void update(int t, int observation){
       new_node->j = j;
       new_node->children = 0;
       new_node->parent = leaves[max_index];
-      new_node->parent->children +=1;
+      if (new_node->parent)
+         new_node->parent->children +=1;
       new_node->previous = last;
       last = new_node;
       //leaves[j] = new_node;
    }
-   leaves[3] = last;
-   leaves[2] = last->previous;
-   leaves[1] = last->previous->previous;
-   leaves[0] = last->previous->previous->previous; 
+
+   node_t * current = last;
+   for (int j = K; j > 0 ; j--){
+      leaves[j-1] = current;
+      current = current->previous;
+   }
 
    compress(t);
 
    if(find_new_root()){
       traceback();
-   }  
+   }
 }
 
 void printList(){
    node_t *aux = last;
    while(aux != NULL){
-      printf("t: %d,  j: %d \n", aux->t, aux->j);
+      printf("t: %d,  j: %d , parent: (%d, %d), child: %d \n", aux->t, aux->j, (aux->parent!=NULL)? aux->parent->t : 0, (aux->parent!=NULL)? aux->parent->j: 0, aux->children );
       aux = aux->previous;
    }
    printf("\n\n");
 }
+
+
+void printProbList(){
+   prob_column_t * p_col = probs_last_column;   //Pointer to last column of probabilities matrix
+
+   printf("\n");
+   while(p_col!=NULL){
+      for(int i=0;i<K;i++) {
+         printf("%0.3lf  ", p_col->col[i]);
+      }
+      printf("\n");
+      p_col = p_col->previous;
+   }
+}
+
+
+
+void printStateList(){
+   state_column_t * s_col = states_last_column;   //Pointer to last column of probabilities matrix
+
+   printf("\n");
+   while(s_col!=NULL){
+      for(int i=0;i<K;i++) {
+         printf("%d  ", s_col->col[i]);
+      }
+      printf("\n");
+      s_col = s_col->previous;
+   }
+}
+
 
 ///////////////////////////////////////////////////////////////////
 
@@ -379,25 +511,23 @@ void printArray(int size, int *array){
     }
 }
 
-int main() {
-  int previous = 0;
-  static int observations[T] = {0};
-  
-   //int observations[T] = {1,2,3,0,1,2,3,0,1,2,3,3,3,3,3,3,0,2,1,2};
-   //std_viterbi(observations);
-   //printArray(T, optimalPath);
 
+int main() {
+   int previous = 0;
+   static int observations[T] = {0};
    int count = 0;
-   for(int i = 0; i<100*60*60; i++){
+
+   srand((unsigned)time(NULL));
+
+   online_viterbi_initialization(0);
+
+   for(int i = 0; i<100*60*60 ;i++){
      
       count = i%T;
       observations[count] = (previous + rand()%2)%4;
       previous = observations[count];
-      if(count == 0){
-         online_viterbi_initialization(observations[count]);
-      } else {
-         update(i, observations[count]);
-      }
+
+      update(count, observations[count]);
 
       if(count == T-1){
 
@@ -408,26 +538,16 @@ int main() {
          std_viterbi(observations);
          printf("\nStd Viterbi window:  ");
          printArray(T, optimalPath);
+
          printf("\n\n");
+
+         // for fresh new start of online viterbi decoding
+         free_all_nodes();
+         online_viterbi_initialization(0);
       }
+
       usleep(100000);
    } 
-
-  
-   
-   /*
-   //printf("\n\n");
-   online_viterbi_initialization(1);
-
-   for (int t = 1; t < 20; t++) {
-      update(t, observations[t]);
-      printList();
-   }
-   
-   
-   //update(0, 1);
-   */
-
 
    return 0;
 }  
