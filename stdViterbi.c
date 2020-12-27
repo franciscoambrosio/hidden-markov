@@ -3,14 +3,16 @@
 
 #include <stdlib.h>
 #include <stdio.h>
+#include <stdarg.h>
 #include <stdbool.h>
 #include <unistd.h> // For waiting time on Linux
 #include <time.h> // For waiting time on Linux
+#include <math.h>
 
 
 #define  K  (4)          //# of Hidden States
 #define  M  (4)          //# of Observation Symbols
-#define  T  (10)        //# of time instances
+#define  T  (1000)        //# of time instances
 
 const double A[K][K] = { { 0.96, 0.04, 0.0, 0.0 }, //Transition Probability Matrix
                            { 0, 0.95, 0.05, 0.0 }, 
@@ -59,7 +61,35 @@ state_column_t * states_last_column = NULL;   //Pointer to last column of states
 
 int decoded_stream[T];
 int decoded_stream_idx=0;
+
+double B = -2000000;       // lower bound for log probabilities
+
+double bounded_log(double a) {
+    if (a == 0)
+        return B;
+    else
+        return log(a);
+}
+
+double bounded_log_sum( int num, ... ) {
+
+    va_list arguments;                     
+    double sum = 0;
+
+    va_start ( arguments, num );           
+
+    for ( int x = 0; x < num; x++ )        
+        sum +=  va_arg ( arguments, double ) ; 
+
+    va_end ( arguments );
  
+    if (sum < B)
+      sum = B;
+
+    return sum;
+}
+
+
 void online_viterbi_initialization(int starting_state){
    last = NULL;
    decoded_stream_idx = 0;
@@ -76,7 +106,7 @@ void online_viterbi_initialization(int starting_state){
    s_first->previous = NULL;
 
    for (int j = 0; j < K; j++){
-      p_first->col[j] = initial[j];
+      p_first->col[j] = bounded_log(initial[j]);
       s_first->col[j] = starting_state;
    }
    //p_first->col[starting_state] = 1;
@@ -98,7 +128,7 @@ void online_viterbi_initialization(int starting_state){
 
 
 void compress(int t) {
-   node_t * current = last;
+   node_t * current = (node_t *)  last;
    node_t * aux = NULL;   //Auxiliary node
    node_t * last_visited = last;   //Auxiliary node
 
@@ -110,18 +140,25 @@ void compress(int t) {
             last_visited->previous = current->previous;
             free(current);
             current = aux;
-         }        
+            last_visited = current;
+            current = current->previous;            
+         } else {
+            last_visited = current;
+            current = current->previous;     
+         }
+
       } else {
          while(current->parent != NULL && current->parent->children == 1){
             aux = current->parent->parent;
             current->parent = aux;
          }
+         last_visited = current;
+         current = current->previous;              
       }
-      if(current->previous == current){
-         current->previous = NULL;
-      }
-      last_visited = current;
-      current = current->previous;
+      // if(current->previous == current){
+      //    current->previous = NULL;
+      // }
+
    }
 
    //Free remaininig nodes with 0 children that are not leaves
@@ -130,19 +167,28 @@ void compress(int t) {
    while (current != NULL) {
       if(current->children == 0 && current->t != t) {
          aux = current->previous;
+         if (current->parent) current->parent->children -= 1;
          last_visited->previous = current->previous;
          free(current);
          current = aux;  
+
+         last_visited = current;
+         if(current != NULL){current = current->previous;}
+
       }
-      last_visited = current;
-      if(current != NULL){current = current->previous;}
+      else {
+         last_visited = current;
+         if(current != NULL){current = current->previous;}
+      }
+      // last_visited = current;
+      // if(current != NULL){current = current->previous;}
       
    }
 }
 
 
 void free_all_nodes(void) {
-   node_t * current = last;
+   node_t * current = (node_t *) last;
    node_t * temp = NULL;
 
    while (current != NULL) {
@@ -159,10 +205,8 @@ bool find_new_root(){
    //Returns true if root has changed based on time delta between previous root and new root
 
    delta_t = 0;
-   node_t * current = last;
-   node_t * aux = last;   //Auxiliary node - Last node that has 2 or more children
-   delta_t = last->t;
-
+   node_t * current = (node_t *) last;
+   node_t * aux = NULL;   //Auxiliary node - Last node that has 2 or more children
 
    // first make sure path has merged
    if (root==NULL){
@@ -203,7 +247,8 @@ bool find_new_root(){
   */
   
 
-
+   current = (node_t *) last;
+   delta_t = last->t;
 
    while (current != NULL) {
       if (current->children >= 2){
@@ -211,20 +256,23 @@ bool find_new_root(){
       }
       current = current->parent;
    }
-   if(aux != root){  //Test if root has changed
-      delta_t -= aux->t;
-      if(delta_t == 0){
-         return false;
+   if (aux !=NULL)
+      if(aux != root){  //Test if root has changed
+         delta_t -= aux->t;
+         if(delta_t == 0){
+            return false;
+         }
+         else
+         {
+            if (root)
+               prev_root_time = root->t;
+            root = aux;
+            // printf("\n New root found (time : %d, state : %d)", root->t, root->j);
+            return true;
+         }
       }
-      else
-      {
-         if (root)
-            prev_root_time = root->t;
-         root = aux;
-         return true;
-      }
-   }
-   return false;
+   else
+      return false;
 }
 
 void traceback(){
@@ -305,8 +353,8 @@ void traceback_last_part(){
    int depth = 0;
 
    // get index for maximum value of last column
-   double max = -1;
-   double aux = -1;
+   double max = B;
+   double aux = B;
    int max_index = 0;
    for (int i = 0; i < K; i++){
       aux = p_col->col[i];
@@ -376,6 +424,7 @@ void update(int t, int observation){
    p_new = (prob_column_t *) calloc(1, sizeof(prob_column_t));
    
    p_new->previous = probs_last_column;
+   p_new->next = NULL;
    probs_last_column->next = p_new;
    probs_last_column = p_new;
 
@@ -383,15 +432,16 @@ void update(int t, int observation){
    s_new = (state_column_t *) calloc(1, sizeof(state_column_t));
  
    s_new->previous = states_last_column;
+   s_new->next = NULL;
    states_last_column->next = s_new;
    states_last_column = s_new;
 
    for (int j = 0; j < K; j++){
-      double max = -1;
-      double aux = -1;
+      double max = B;
+      double aux = B;
       int max_index = 0;
       for (int i = 0; i < K; i++){
-         aux = probs_last_column->previous->col[i]*A[i][j]*E[j][observation];
+         aux = bounded_log_sum( 3, probs_last_column->previous->col[i], bounded_log(A[i][j]), bounded_log(E[j][observation]) );
          if (aux > max){
             max = aux;
             max_index = i;
@@ -440,7 +490,7 @@ void update(int t, int observation){
 void printList(){
    node_t *aux = last;
    while(aux != NULL){
-      printf("t: %d,  j: %d , parent: (%d, %d), child: %d \n", aux->t, aux->j, (aux->parent!=NULL)? aux->parent->t : 0, (aux->parent!=NULL)? aux->parent->j: 0, aux->children );
+      printf("t: %d,  j: %d , parent: (%d, %d), child: %d \n", aux->t, aux->j, (aux->parent!=NULL)? aux->parent->t : -1, (aux->parent!=NULL)? aux->parent->j: -1, aux->children );
       aux = aux->previous;
    }
    printf("\n\n");
@@ -484,28 +534,43 @@ int optimalPath[T] = {0};
 
 
 void std_viterbi_initialization(int* observations){
-   for (size_t i = 0; i < M; i++){
-      scores[i][0] = initial[i]*E[i][observations[0]];
+   double max = B;
+   double aux = B;
+   int max_index = 0;
+   for (size_t j = 0; j < K; j++){
+
+      max = B;
+      aux = B;
+      max_index = 0;
+      for (int i = 0; i < K; i++){
+         aux = bounded_log_sum( 2, bounded_log(initial[i]), bounded_log(A[i][j]) );
+         if (aux > max){
+            max = aux;
+            max_index = i;
+         }
+      }
+      scores[j][0] = bounded_log_sum( 2, max, bounded_log(E[j][observations[0]]) );
+      path[j][0] = max_index;
    }
 }
 
 void std_viterbi_recursion(int* observations) {
-   double max = -1;
-   double aux = -1;
+   double max = B;
+   double aux = B;
    int max_index = 0;
    for (int t = 1; t < T; t++){
       for (int j = 0; j < K; j++){
-         max = -1;
-         aux = -1;
+         max = B;
+         aux = B;
          max_index = 0;
          for (int i = 0; i < K; i++){
-            aux = scores[i][t-1]*A[i][j];
+            aux = bounded_log_sum( 2, scores[i][t-1], bounded_log(A[i][j]) );
             if (aux > max){
                max = aux;
                max_index = i;
             }
          }
-         scores[j][t] = max*E[j][observations[t]];
+         scores[j][t] = bounded_log_sum( 2, max, bounded_log(E[j][observations[t]]) );
          path[j][t] = max_index;
       }
    }
@@ -513,7 +578,7 @@ void std_viterbi_recursion(int* observations) {
 
 void std_viterbi_termination(){
    int max_index = 0;
-   double max = 0;
+   double max = B;
    for (int j = 0; j < K; j++){
       if(scores[j][T-1] > max){
          max = scores[j][T-1];
@@ -570,13 +635,27 @@ int main() {
          printArray(T, decoded_stream);
          printf("\n\n");
 
+         // check if two path matches
+         int j;
+         for (j=0;j<T;j++) {
+            if ( optimalPath[j] != decoded_stream[j] )
+               break;
+         }
+         if (j==T)
+            printf("Results match! \n");
+         else
+            printf("Results don't match\n ");
+
+         usleep(1000000);
+
          // for fresh new start of online viterbi decoding
          free_all_nodes();
          online_viterbi_initialization(0);
       }
 
-      usleep(100000);
+      usleep(10000);
    } 
 
    return 0;
 }  
+
