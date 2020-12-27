@@ -7,12 +7,14 @@
 #include <stdbool.h>
 #include <unistd.h> // For waiting time on Linux
 #include <time.h> // For waiting time on Linux
-#include <math.h>
 
+#include <math.h>
 
 #define  K  (4)          //# of Hidden States
 #define  M  (4)          //# of Observation Symbols
+
 #define  T  (1000)        //# of time instances
+
 
 const double A[K][K] = { { 0.96, 0.04, 0.0, 0.0 }, //Transition Probability Matrix
                            { 0, 0.95, 0.05, 0.0 }, 
@@ -62,6 +64,7 @@ state_column_t * states_last_column = NULL;   //Pointer to last column of states
 int decoded_stream[T];
 int decoded_stream_idx=0;
 
+
 double B = -2000000;       // lower bound for log probabilities
 
 double bounded_log(double a) {
@@ -82,6 +85,7 @@ double bounded_log_sum( int num, ... ) {
         sum +=  va_arg ( arguments, double ) ; 
 
     va_end ( arguments );
+
  
     if (sum < B)
       sum = B;
@@ -188,6 +192,7 @@ void compress(int t) {
 
 
 void free_all_nodes(void) {
+
    node_t * current = (node_t *) last;
    node_t * temp = NULL;
 
@@ -237,6 +242,36 @@ bool find_new_root(){
          return false;
    }
 
+
+   // first make sure path has merged
+   if (root==NULL){
+      node_t *leaf = last;
+      node_t *traced_root[K] = {NULL,};
+      node_t *temp = NULL;
+      node_t *track = NULL;
+      for (int i=0 ; i<K ; i++){
+         track = leaf;
+         while (track != NULL){
+            temp =  track;
+            track = track->parent;
+            if (track==NULL)
+               traced_root[i] = temp;
+         }
+         leaf = leaf->previous;
+      }
+
+      bool merged = true;
+      for (int i=1;i<K;i++){
+         if (traced_root[0] != traced_root[i]) {
+            merged = false;
+            break;
+         }
+      }
+
+      if (!merged)
+         return false;
+   }
+
    /*
    Find last node that has at least 2 children starting from any leave or node with at least two children
 
@@ -247,8 +282,10 @@ bool find_new_root(){
   */
   
 
+
    current = (node_t *) last;
    delta_t = last->t;
+
 
    while (current != NULL) {
       if (current->children >= 2){
@@ -256,6 +293,7 @@ bool find_new_root(){
       }
       current = current->parent;
    }
+
    if (aux !=NULL)
       if(aux != root){  //Test if root has changed
          delta_t -= aux->t;
@@ -270,6 +308,7 @@ bool find_new_root(){
             // printf("\n New root found (time : %d, state : %d)", root->t, root->j);
             return true;
          }
+
       }
    else
       return false;
@@ -353,8 +392,10 @@ void traceback_last_part(){
    int depth = 0;
 
    // get index for maximum value of last column
+
    double max = B;
    double aux = B;
+
    int max_index = 0;
    for (int i = 0; i < K; i++){
       aux = p_col->col[i];
@@ -441,7 +482,9 @@ void update(int t, int observation){
       double aux = B;
       int max_index = 0;
       for (int i = 0; i < K; i++){
+
          aux = bounded_log_sum( 3, probs_last_column->previous->col[i], bounded_log(A[i][j]), bounded_log(E[j][observation]) );
+
          if (aux > max){
             max = aux;
             max_index = i;
@@ -490,7 +533,9 @@ void update(int t, int observation){
 void printList(){
    node_t *aux = last;
    while(aux != NULL){
+
       printf("t: %d,  j: %d , parent: (%d, %d), child: %d \n", aux->t, aux->j, (aux->parent!=NULL)? aux->parent->t : -1, (aux->parent!=NULL)? aux->parent->j: -1, aux->children );
+
       aux = aux->previous;
    }
    printf("\n\n");
