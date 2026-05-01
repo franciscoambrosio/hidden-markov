@@ -1,25 +1,11 @@
 # Hidden Markov Models — Viterbi Decoding in C
 
-Fast C implementations of two Viterbi algorithms for decoding Hidden Markov Models:
+C implementations of two Viterbi algorithms for decoding Hidden Markov Models:
 
 1. **Standard Viterbi**: classic two-pass algorithm (initialization → recursion → traceback)
 2. **Online Viterbi**: streaming variant with path compression for near-real-time decoding
 
 Both decode a sequence of T observations into the most likely sequence of hidden states.
-
-## Build
-
-```bash
-make          # compile to 'viterbi' binary
-make run      # compile and run the test
-make clean    # remove binary
-```
-
-Or manually:
-```bash
-gcc -O2 -Wall -o viterbi stdViterbi.c -lm
-./viterbi
-```
 
 ## Test
 
@@ -30,15 +16,11 @@ The program runs a **correctness test** that:
 - Compares: if paths match, **PASS**; if they differ, **FAIL**
 
 ```
-$ make run
-
 HMM Viterbi — correctness test
   States: 4  |  Symbols: 4  |  Sequence length: 1000
 
 PASS  both algorithms produce identical paths (1000 states)
 ```
-
-Exit code 0 = PASS, non-zero = FAIL.
 
 ## HMM Parameters
 
